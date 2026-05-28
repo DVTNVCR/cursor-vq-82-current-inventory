@@ -1,0 +1,4 @@
+@EndUserText.label: 'Current Inventory by Patient - API'
+define service ZUI_CURRENT_INVENTORY {
+  expose ZC_CurrentInventoryByPatient as CurrentInventory;
+}

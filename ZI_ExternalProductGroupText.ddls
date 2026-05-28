@@ -1,0 +1,11 @@
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'External Product Group Text'
+@VDM.viewType: #BASIC
+
+define view entity ZI_ExternalProductGroupText
+  as select from twewt
+{
+  key extwg    as ExternalProductGroup,
+  key spras    as Language,
+      ewbez    as ExternalProductGroupText
+}
