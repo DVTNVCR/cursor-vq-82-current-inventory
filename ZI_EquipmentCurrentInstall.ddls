@@ -1,0 +1,18 @@
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Equipment + current EQUZ time-slice (V_EQUI replacement)'
+@VDM.viewType: #BASIC
+
+define view entity ZI_EquipmentCurrentInstall
+  as select from    equi as e
+    inner join      equz as z
+      on e.equnr = z.equnr
+{
+  key e.equnr          as Equipment,
+      e.matnr          as Material,
+      e.sernr          as SerialNumber,
+      e.charge         as Batch,
+      z.kund2          as Customer,
+      z.datab          as ValidityStartDate,
+      z.datbi          as ValidityEndDate
+}
+where z.datbi = '99991231'

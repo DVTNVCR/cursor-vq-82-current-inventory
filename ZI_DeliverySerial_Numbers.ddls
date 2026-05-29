@@ -1,0 +1,24 @@
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Serial Numbers per Delivery Item'
+@VDM.viewType: #BASIC
+@Metadata.allowExtensions: true
+
+define view entity ZI_DeliverySerial_Numbers
+  as select from ZI_DeliveryGoodsMovement as flow
+
+    inner join ZI_GoodsMovementSerial as h
+      on  h.MaterialDocument     = flow.MaterialDocument
+      and h.MaterialDocumentYear = flow.MaterialDocumentYear
+      and h.MaterialDocumentItem = flow.MaterialDocumentItem
+
+    inner join objk as o
+      on o.obknr = h.ObjectNumber
+
+{
+  key flow.DeliveryDocument        as DeliveryDocument,
+  key flow.DeliveryDocumentItem    as DeliveryDocumentItem,
+  key o.equnr                      as Equipment,
+      o.sernr                      as SerialNumber,
+      o.matnr                      as Product
+}
+where o.taser = 'SER03'

@@ -6,7 +6,7 @@ define view entity ZI_PatientEquipmentDelivered
   as select from I_DeliveryDocument as dlv
     inner join I_DeliveryDocumentItem as dit
       on dit.DeliveryDocument = dlv.DeliveryDocument
-    inner join ZI_DeliverySerial as dsr
+    inner join ZI_DeliverySerial_Numbers as dsr
       on  dsr.DeliveryDocument     = dit.DeliveryDocument
       and dsr.DeliveryDocumentItem = dit.DeliveryDocumentItem
 {

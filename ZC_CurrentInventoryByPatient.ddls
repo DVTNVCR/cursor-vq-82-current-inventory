@@ -6,50 +6,59 @@
 @Search.searchable: true
 
 define view entity ZC_CurrentInventoryByPatient
-  as select distinct from ZI_PatientEquipmentDelivered as ped
+  as select from ZI_EquipmentCurrentInstall        as ecc
 
-    inner join ZI_SerialCurrentCustomer       as scc
-      on scc.Equipment = ped.Equipment
+    left outer join ZI_PatientEquipmentDelivered   as ped
+      on  ped.Patient   = ecc.Customer
+      and ped.Equipment = ecc.Equipment
 
-    inner join ZI_PatientShipTo               as pst
-      on  pst.Patient = ped.Patient
-      and pst.ShipTo  = scc.Customer
+    left outer join ZI_PatientLatestArrayLot       as lat
+      on lat.Patient = ecc.Customer
 
-    left outer join I_Product                 as prd
-      on prd.Product = ped.Product
+    left outer join I_Product                      as prd
+      on prd.Product = ecc.Material
 
-    left outer join I_ProductDescription      as pdt
-      on  pdt.Product  = ped.Product
+    left outer join I_ProductDescription           as pdt
+      on  pdt.Product  = ecc.Material
       and pdt.Language = $session.system_language
 
-    left outer join ZI_ExternalProductGroupText as egt
+    left outer join ZI_ExternalProductGroupText    as egt
       on  egt.ExternalProductGroup = prd.ExternalProductGroup
       and egt.Language             = $session.system_language
 
 {
   @Semantics.businessPartner.id: true
   @Search.defaultSearchElement: true
-  key ped.Patient                                                           as Patient,
+  key ecc.Customer                                                                 as Patient,
 
-  key ped.Equipment                                                         as Equipment,
+  key ecc.Equipment                                                                as Equipment,
 
-      ped.SerialNumber                                                      as SerialNumber,
+      max( ecc.SerialNumber )                                                      as SerialNumber,
 
-      ltrim( ped.Product, '0' )                                             as Product,
+      ltrim( max( ecc.Material ), '0' )                                            as Product,
 
       @Semantics.batch.batchNumber: true
-      ped.Batch                                                             as Batch,
+      coalesce( max( ped.Batch ), max( ecc.Batch ) )                               as LotNumber,
 
-      ped.SalesOrder                                                        as SalesOrder,
+      @Semantics.batch.batchNumber: true
+      max( lat.LatestArrayLot )                                                    as LatestArrayLot,
+
+      max( lat.LatestArrayDeliveryDate )                                           as LatestArrayDeliveryDate,
+
+      max( ped.SalesOrder )                                                        as SalesOrder,
 
       @Semantics.businessDate.from: true
-      ped.EarliestPgiDate                                                   as IssueDate,
+      coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) )         as IssueDate,
 
-      @Semantics.quantity.unitOfMeasure: 'DAY'
-      cast( dats_days_between( ped.EarliestPgiDate, $session.system_date )
-            as abap.int4 preserving type )                                  as DaysWithPatient,
+      cast( dats_days_between(
+              coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) ),
+              $session.system_date
+            ) as abap.int4 )                                                       as DaysWithPatient,
 
-      pdt.ProductDescription                                                as ProductDescription,
-      prd.ExternalProductGroup                                              as ExternalProductGroup,
-      egt.ExternalProductGroupText                                          as ExternalProductGroupText
+      max( prd.ProductType )                                                       as ProductType,
+      max( pdt.ProductDescription )                                                as ProductDescription,
+      max( prd.ExternalProductGroup )                                              as ExternalProductGroup,
+      max( egt.ExternalProductGroupText )                                          as ExternalProductGroupText
 }
+where ecc.Customer is not initial
+group by ecc.Customer, ecc.Equipment
