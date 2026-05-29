@@ -100,6 +100,7 @@ Step-3 in the original spec (the SER01 + Ship-To matching) is **dropped** from t
 | `OBJK` | — | Joined directly inside `ZI_DeliverySerial_Numbers` (no standalone wrap needed) |
 | `EQUI` + `EQUZ` (KUND2) | `I_Equipment` was tried but projects header `EQUI.KUND2` only, not the EQUZ time-slice | `ZI_EquipmentCurrentInstall` — direct `EQUI ⋈ EQUZ` wrap (mirrors V_EQUI), spine of the consumption view |
 | `LIKP` + `LIPS` (non-FIELDEQUIP batch) | `I_DeliveryDocument` + `I_DeliveryDocumentItem` | `ZI_PatientLatestArrayLot` — finds each patient's most recent consumable-array batch for the OData enrichment field |
+| `AUSP` (classification values) | `I_ClfnObjectCharcValForKeyDate` (parameterized released view, P_KeyDate = today) | Joined inline in the consumption view for `ManufactureDate` (characteristic `Z_DATE_OF_MANUFACTURE`, internal ID `0000000151`, class type `002`) |
 
 ### View dependency (Path C, revised twice)
 
@@ -121,7 +122,8 @@ ZC_CurrentInventoryByPatient                                  (consumption — Z
    │
    ├── I_Product                           [released — keyed on I_Equipment.Material]
    ├── I_ProductDescription                [released]
-   └── ZI_ExternalProductGroupText         [TWEWT wrap — TWEWT not released in 2020]
+   ├── ZI_ExternalProductGroupText         [TWEWT wrap — TWEWT not released in 2020]
+   └── I_ClfnObjectCharcValForKeyDate      [released parameterized view — characteristic Z_DATE_OF_MANUFACTURE for ManufactureDate]
 ```
 
 ### Notes on conventions
@@ -357,6 +359,15 @@ define view entity ZC_CurrentInventoryByPatient
       on  egt.ExternalProductGroup = prd.ExternalProductGroup
       and egt.Language             = $session.system_language
 
+    /* Classification characteristic 'Z_DATE_OF_MANUFACTURE' (internal ID 0000000151)
+       on equipment class type 002 — date value lives in CharcFromDate (single-value
+       characteristic) or CharcToDate (range upper bound) depending on master-data setup. */
+    left outer join I_ClfnObjectCharcValForKeyDate( P_KeyDate: $session.system_date ) as cv
+      on  cv.ClfnObjectTable = 'EQUI'
+      and cv.ClassType       = '002'
+      and cv.ClfnObjectID    = ecc.Equipment
+      and cv.CharcInternalID = '0000000151'
+
 {
   @Semantics.businessPartner.id: true
   @Search.defaultSearchElement: true
@@ -386,6 +397,12 @@ define view entity ZC_CurrentInventoryByPatient
               $session.system_date
             ) as abap.int4 )                                                       as DaysWithPatient,
 
+      @Semantics.systemDate.createdAt: true
+      max( ecc.CreationDate )                                                      as CreatedDate,
+
+      @Semantics.businessDate.from: true
+      max( coalesce( cv.CharcFromDate, cv.CharcToDate ) )                          as ManufactureDate,
+
       max( prd.ProductType )                                                       as ProductType,
       max( pdt.ProductDescription )                                                as ProductDescription,
       max( prd.ExternalProductGroup )                                              as ExternalProductGroup,
@@ -413,6 +430,7 @@ define view entity ZI_EquipmentCurrentInstall
       e.matnr          as Material,
       e.sernr          as SerialNumber,
       e.charge         as Batch,
+      e.erdat          as CreationDate,
       z.kund2          as Customer,
       z.datab          as ValidityStartDate,
       z.datbi          as ValidityEndDate
@@ -420,9 +438,12 @@ define view entity ZI_EquipmentCurrentInstall
 where z.datbi = '99991231'
 ```
 
-- `ecc.Customer / ecc.Equipment` are the output keys. `SerialNumber`, `Material`, and `Batch` come straight from EQUI so they're always populated.
+- `ecc.Customer / ecc.Equipment` are the output keys. `SerialNumber`, `Material`, `Batch`, and `CreationDate` come straight from EQUI so they're always populated.
 - `ZI_PatientEquipmentDelivered` is LEFT OUTER. Equipment that can be back-traced to a patient-as-Sold-To delivery gets `SalesOrder` from the delivery trace. Equipment that *can't* (older deliveries shipped under a different Sold-To — insurance, parent BP, etc.) gets `null` for `SalesOrder`.
 - `LotNumber` and `IssueDate` use `coalesce` to fall back from the delivery trace to the EQUI/EQUZ source (the FM's `charge` and `datab` columns), so all 11 rows are populated for our test patient.
+- `CreatedDate` is `EQUI.ERDAT` (equipment master record creation), surfaced through the spine.
+- `ManufactureDate` joins `I_ClfnObjectCharcValForKeyDate` — the released parameterized view that resolves the classification value valid as of `$session.system_date`. Hardcoded filters bind to class type `002`, classifiable object `EQUI`, and characteristic internal ID `0000000151` (= `Z_DATE_OF_MANUFACTURE` in this system; verify via `I_ClfnCharacteristic` if needed). The actual date lives in either `CharcFromDate` (single-value characteristic) or `CharcToDate` (range upper bound); `coalesce` picks whichever the master-data setup populated. Equipment without a manufacture-date characteristic value returns `null`.
+- Both `CreatedDate` and `ManufactureDate` are exposed as native DATS — OData V4 serializes them as `Edm.Date` (YYYY-MM-DD in JSON). Switch to string-format only if a downstream consumer can't bind `Edm.Date` and needs the literal `cast(... as char(32)) + substring + concat` pattern from `ZI_EQUIPMENT` / `ZI_ORDER_DELIVERY_BATCH`.
 - Authorization check on the spine is `#NOT_REQUIRED` because `EQUI/EQUZ` carry no auth-relevant fields beyond what's already checked by the patient `BU_PARTNER` filter at the API layer.
 
 #### Why not use `I_Equipment` (rejected attempt)
@@ -494,6 +515,12 @@ GET /sap/opu/odata4/sap/zui_current_inventory/srvd_a2x/sap/zui_current_inventory
 5. **Performance** — `Patient` filter pushes down to two indexed paths simultaneously: `LIKP-KUNAG` (delivery spine) and `EQUI/EQUZ-KUND2` (currently-registered gate). HANA's join optimizer should drive the smaller set (typically the EQUI side, since `KUND2 = patient` is highly selective — ~23 rows in the test case) and use that to prune the delivery trace. The VBFA hop is keyed on `VBELV` (delivery number) which is indexed in standard SAP.
 6. **`EQUI` / `EQUZ` direct access** — `ZI_EquipmentCurrentInstall` reads `EQUI ⋈ EQUZ` directly (no released CDS view in 2020 projects `EQUZ.KUND2`). ATC will flag this as a classical-table dependency; that's expected. Add the view to the "retire when SAP releases an EQUZ-time-slice-customer view" upgrade backlog. The `WHERE datbi = '99991231'` filter is the standard SAP convention for the currently-valid time slice — verify in your data with `SELECT DISTINCT datbi FROM equz` if you want absolute confidence.
 7. **Equipment + batch mismatch across deliveries** — `max(Batch)` picks lexicographically. If your data ever has different batches for the same physical equipment across re-shipments, switch to "batch from the earliest delivery" via a self-join. Uncommon in equipment leasing; flag if it shows up.
+8. **Classification characteristic `Z_DATE_OF_MANUFACTURE` (internal ID `0000000151`)** — the consumption view's `ManufactureDate` join binds to a system-specific characteristic internal ID. Internal IDs are stable within a single system landscape but differ across systems. Verify in your system:
+   ```sql
+   SELECT CharcInternalID, Characteristic FROM I_ClfnCharacteristic WHERE Characteristic = 'Z_DATE_OF_MANUFACTURE'
+   ```
+   If yours returns something other than `0000000151`, update the literal in the `cv` join's `on` clause. Also confirm the characteristic is on equipment **class type `002`** (the standard SAP equipment class type) and that the equipment objects being queried are assigned to that class. Equipment without an assignment to the relevant class returns `null` for `ManufactureDate` — that's expected behavior, not an error.
+9. **`I_ClfnObjectCharcValForKeyDate` parameterized view authorization** — the released classification view performs its own auth checks against `S_CLASS` / `S_CLATTR`. The OData service runs under the calling user's auth context, so users without classification-read auth will see `null` `ManufactureDate` values even when data exists. If the API is consumed by a technical/service user, ensure that user has read access to class type `002`.
 
 ---
 

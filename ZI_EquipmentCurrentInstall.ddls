@@ -11,6 +11,7 @@ define view entity ZI_EquipmentCurrentInstall
       e.matnr          as Material,
       e.sernr          as SerialNumber,
       e.charge         as Batch,
+      e.erdat          as CreationDate,
       z.kund2          as Customer,
       z.datab          as ValidityStartDate,
       z.datbi          as ValidityEndDate

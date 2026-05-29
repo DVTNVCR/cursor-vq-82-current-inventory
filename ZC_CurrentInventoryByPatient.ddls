@@ -26,6 +26,15 @@ define view entity ZC_CurrentInventoryByPatient
       on  egt.ExternalProductGroup = prd.ExternalProductGroup
       and egt.Language             = $session.system_language
 
+    /* Classification characteristic 'Z_DATE_OF_MANUFACTURE' (internal ID 0000000151)
+       on equipment class type 002 — date value lives in CharcFromDate (single-value
+       characteristic) or CharcToDate (range upper bound) depending on master-data setup. */
+    left outer join I_ClfnObjectCharcValForKeyDate( P_KeyDate: $session.system_date ) as cv
+      on  cv.ClfnObjectTable = 'EQUI'
+      and cv.ClassType       = '002'
+      and cv.ClfnObjectID    = ecc.Equipment
+      and cv.CharcInternalID = '0000000151'
+
 {
   @Semantics.businessPartner.id: true
   @Search.defaultSearchElement: true
@@ -54,6 +63,12 @@ define view entity ZC_CurrentInventoryByPatient
               coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) ),
               $session.system_date
             ) as abap.int4 )                                                       as DaysWithPatient,
+
+      @Semantics.systemDate.createdAt: true
+      max( ecc.CreationDate )                                                      as CreatedDate,
+
+      @Semantics.businessDate.from: true
+      max( coalesce( cv.CharcFromDate, cv.CharcToDate ) )                          as ManufactureDate,
 
       max( prd.ProductType )                                                       as ProductType,
       max( pdt.ProductDescription )                                                as ProductDescription,
