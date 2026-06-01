@@ -105,25 +105,36 @@ Step-3 in the original spec (the SER01 + Ship-To matching) is **dropped** from t
 ### View dependency (Path C, revised twice)
 
 ```
-ZC_CurrentInventoryByPatient                                  (consumption — ZI_EquipmentCurrentInstall is the spine)
+ZC_CurrentInventoryByPatient                                  (consumption — CLASSIC view, UNION ALL of two legs)
    │
-   ├── ZI_EquipmentCurrentInstall          [Z wrap — EQUI ⋈ EQUZ, V_EQUI replacement, SPINE, EQUZ.KUND2 carries Patient]
+   ├──[LEG 1: EQUIPMENT]── ZI_PatientEquipmentInventory       (composite — equipment rows, Path C)
+   │       │
+   │       ├── ZI_EquipmentCurrentInstall          [Z wrap — EQUI ⋈ EQUZ, V_EQUI replacement, SPINE]
+   │       │
+   │       ├── ZI_PatientEquipmentDelivered                           (LEFT OUTER — delivery enrichment)
+   │       │      ├── I_DeliveryDocument           [released — LIKP]
+   │       │      ├── I_DeliveryDocumentItem       [released — LIPS]
+   │       │      └── ZI_DeliverySerial_Numbers            [VBFA → SER03 ⋈ OBJK]
+   │       │             ├── ZI_DeliveryGoodsMovement  [VBFA wrap — POSNN as INT4]
+   │       │             └── ZI_GoodsMovementSerial   [SER03 wrap — ZEILE as INT4]
+   │       │
+   │       ├── ZI_PatientLatestArrayLot                              (LEFT OUTER)
+   │       │      ├── I_DeliveryDocument           [released]
+   │       │      └── I_DeliveryDocumentItem       [released]
+   │       │
+   │       ├── I_Product                           [released]
+   │       ├── I_ProductDescription                [released]
+   │       ├── ZI_ExternalProductGroupText         [TWEWT wrap]
+   │       └── I_ClfnObjectCharcValForKeyDate      [released parameterized — ManufactureDate]
    │
-   ├── ZI_PatientEquipmentDelivered                           (LEFT OUTER — delivery enrichment when reachable)
-   │      ├── I_DeliveryDocument           [released — LIKP]
-   │      ├── I_DeliveryDocumentItem       [released — LIPS]
-   │      └── ZI_DeliverySerial_Numbers            [VBFA → SER03 ⋈ OBJK]
-   │             ├── ZI_DeliveryGoodsMovement  [VBFA wrap — delivery → mat-doc flow, POSNN as INT4]
-   │             └── ZI_GoodsMovementSerial   [SER03 wrap — ZEILE as INT4]
-   │
-   ├── ZI_PatientLatestArrayLot                              (LEFT OUTER — latest non-FIELDEQUIP batch)
-   │      ├── I_DeliveryDocument           [released — LIKP]
-   │      └── I_DeliveryDocumentItem       [released — LIPS]
-   │
-   ├── I_Product                           [released — keyed on I_Equipment.Material]
-   ├── I_ProductDescription                [released]
-   ├── ZI_ExternalProductGroupText         [TWEWT wrap — TWEWT not released in 2020]
-   └── I_ClfnObjectCharcValForKeyDate      [released parameterized view — characteristic Z_DATE_OF_MANUFACTURE for ManufactureDate]
+   └──[LEG 2: CONSUMABLE]── ZI_PatientConsumablesInventory    (composite — consumable rows, Batch ≠ FIELDEQUIP)
+           │
+           ├── I_DeliveryDocument                  [released — LIKP, SoldToParty = Patient]
+           ├── I_DeliveryDocumentItem              [released — LIPS, Batch is the lot number]
+           ├── ZI_PatientLatestArrayLot            [LEFT OUTER — reused from leg 1]
+           ├── I_Product                           [released]
+           ├── I_ProductDescription                [released]
+           └── ZI_ExternalProductGroupText         [TWEWT wrap]
 ```
 
 ### Notes on conventions
@@ -136,9 +147,11 @@ ZC_CurrentInventoryByPatient                                  (consumption — Z
 
 ---
 
-## 5. The eight active CDS views (Path C)
+## 5. The ten active CDS views (Path C — equipment + consumables)
 
 > The spine `ZI_EquipmentCurrentInstall` (Z wrap of `EQUI ⋈ EQUZ`) is documented inline in Section 5.7 as part of the Path C explanation, not in its own subsection — its design is inseparable from why the consumption view is shaped the way it is.
+
+> **2026-06-01 update**: the consumption view now returns both equipment and consumable rows, distinguished by a `RowType` column. Because S/4HANA 2020 / NW 7.55 view entities don't support UNION, the top-level `ZC_CurrentInventoryByPatient` is a *classic* `define view` that UNION ALLs two view-entity helpers (`ZI_PatientEquipmentInventory`, `ZI_PatientConsumablesInventory`). Post-2023 RISE upgrade (NW 7.56+) this collapses back into a single view entity with native union support — see Section 10.
 
 ### 5.1. `ZI_DeliveryGoodsMovement` — delivery → material-document flow (VBFA wrap)
 
@@ -328,17 +341,17 @@ Result: `LatestArrayLot` is the **actual batch from the most recent array delive
 
 ---
 
-### 5.7. `ZC_CurrentInventoryByPatient` — consumption view (no parameters)
+### 5.7. `ZI_PatientEquipmentInventory` — composite (equipment leg)
+
+This is the Path-C equipment-row composite. It used to *be* `ZC_CurrentInventoryByPatient` (as a view entity); the consumables expansion demoted it to a helper. Logic is unchanged.
 
 ```abap
-@AccessControl.authorizationCheck: #CHECK
-@EndUserText.label: 'Current Inventory by Patient'
-@VDM.viewType: #CONSUMPTION
-@ClientHandling.algorithm: #SESSION_VARIABLE
-@ObjectModel.usageType: { serviceQuality: #D, sizeCategory: #S, dataClass: #MIXED }
-@Search.searchable: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Patient Equipment Inventory (Path C leg)'
+@VDM.viewType: #COMPOSITE
+@Metadata.ignorePropagatedAnnotations: true
 
-define view entity ZC_CurrentInventoryByPatient
+define view entity ZI_PatientEquipmentInventory
   as select from ZI_EquipmentCurrentInstall        as ecc
 
     left outer join ZI_PatientEquipmentDelivered   as ped
@@ -359,9 +372,6 @@ define view entity ZC_CurrentInventoryByPatient
       on  egt.ExternalProductGroup = prd.ExternalProductGroup
       and egt.Language             = $session.system_language
 
-    /* Classification characteristic 'Z_DATE_OF_MANUFACTURE' (internal ID 0000000151)
-       on equipment class type 002 — date value lives in CharcFromDate (single-value
-       characteristic) or CharcToDate (range upper bound) depending on master-data setup. */
     left outer join I_ClfnObjectCharcValForKeyDate( P_KeyDate: $session.system_date ) as cv
       on  cv.ClfnObjectTable = 'EQUI'
       and cv.ClassType       = '002'
@@ -369,40 +379,22 @@ define view entity ZC_CurrentInventoryByPatient
       and cv.CharcInternalID = '0000000151'
 
 {
-  @Semantics.businessPartner.id: true
-  @Search.defaultSearchElement: true
   key ecc.Customer                                                                 as Patient,
-
   key ecc.Equipment                                                                as Equipment,
 
       max( ecc.SerialNumber )                                                      as SerialNumber,
-
       ltrim( max( ecc.Material ), '0' )                                            as Product,
-
-      @Semantics.batch.batchNumber: true
       coalesce( max( ped.Batch ), max( ecc.Batch ) )                               as LotNumber,
-
-      @Semantics.batch.batchNumber: true
       max( lat.LatestArrayLot )                                                    as LatestArrayLot,
-
       max( lat.LatestArrayDeliveryDate )                                           as LatestArrayDeliveryDate,
-
       max( ped.SalesOrder )                                                        as SalesOrder,
-
-      @Semantics.businessDate.from: true
       coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) )         as IssueDate,
-
       cast( dats_days_between(
               coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) ),
               $session.system_date
             ) as abap.int4 )                                                       as DaysWithPatient,
-
-      @Semantics.systemDate.createdAt: true
       max( ecc.CreationDate )                                                      as CreatedDate,
-
-      @Semantics.businessDate.from: true
       max( coalesce( cv.CharcFromDate, cv.CharcToDate ) )                          as ManufactureDate,
-
       max( prd.ProductType )                                                       as ProductType,
       max( pdt.ProductDescription )                                                as ProductDescription,
       max( prd.ExternalProductGroup )                                              as ExternalProductGroup,
@@ -412,47 +404,158 @@ where ecc.Customer is not initial
 group by ecc.Customer, ecc.Equipment
 ```
 
-#### How Path C (revised twice) lands in the consumption view
+#### How Path C lands
 
-`ZI_EquipmentCurrentInstall` is the **spine**, structurally a clone of `V_EQUI`. Each row in it with `Customer = patient` becomes one row in the output — same semantics as the FM (`SELECT v_equi WHERE kund2 = patient`):
+- Spine = `ZI_EquipmentCurrentInstall` (the V_EQUI replacement; reads `EQUZ.KUND2` for the current time-slice customer — matches the FM's source).
+- `ZI_PatientEquipmentDelivered` is LEFT OUTER; equipment that can be back-traced to a patient-as-Sold-To delivery gets `SalesOrder`. Equipment that can't (older deliveries shipped under a different Sold-To) gets `null` for `SalesOrder`.
+- `LotNumber` and `IssueDate` `coalesce` from delivery trace to EQUI/EQUZ source so every row is populated.
+- `CreatedDate` = `EQUI.ERDAT`; `ManufactureDate` = classification characteristic `Z_DATE_OF_MANUFACTURE` (CharcInternalID `0000000151`) on equipment class type `002`, time-resolved via `I_ClfnObjectCharcValForKeyDate`.
+- `I_Equipment` was tried as spine and rejected: it projects header `EQUI.KUND2` only, drifts from `EQUZ.KUND2` for equipment with assignment history (4 rows vs the FM's 11 for patient 1041467).
+
+---
+
+### 5.8. `ZI_PatientConsumablesInventory` — composite (consumable leg)
+
+Every PGI'd delivery item to the patient where the batch is a real lot (not `FIELDEQUIP`). One row per `(Patient, DeliveryDocument, DeliveryDocumentItem)`.
 
 ```abap
 @AccessControl.authorizationCheck: #NOT_REQUIRED
-@EndUserText.label: 'Equipment + current EQUZ time-slice (V_EQUI replacement)'
-@VDM.viewType: #BASIC
+@EndUserText.label: 'Patient Consumables Inventory'
+@VDM.viewType: #COMPOSITE
+@Metadata.ignorePropagatedAnnotations: true
 
-define view entity ZI_EquipmentCurrentInstall
-  as select from    equi as e
-    inner join      equz as z
-      on e.equnr = z.equnr
+define view entity ZI_PatientConsumablesInventory
+  as select from    I_DeliveryDocument           as dlv
+
+    inner join      I_DeliveryDocumentItem       as dit
+      on dit.DeliveryDocument = dlv.DeliveryDocument
+
+    left outer join ZI_PatientLatestArrayLot     as lat
+      on lat.Patient = dlv.SoldToParty
+
+    left outer join I_Product                    as prd
+      on prd.Product = dit.Material
+
+    left outer join I_ProductDescription         as pdt
+      on  pdt.Product  = dit.Material
+      and pdt.Language = $session.system_language
+
+    left outer join ZI_ExternalProductGroupText  as egt
+      on  egt.ExternalProductGroup = prd.ExternalProductGroup
+      and egt.Language             = $session.system_language
+
 {
-  key e.equnr          as Equipment,
-      e.matnr          as Material,
-      e.sernr          as SerialNumber,
-      e.charge         as Batch,
-      e.erdat          as CreationDate,
-      z.kund2          as Customer,
-      z.datab          as ValidityStartDate,
-      z.datbi          as ValidityEndDate
+  key dlv.SoldToParty                                                              as Patient,
+  key dlv.DeliveryDocument                                                         as DeliveryDocument,
+  key dit.DeliveryDocumentItem                                                     as DeliveryDocumentItem,
+
+      ltrim( dit.Material, '0' )                                                   as Product,
+      dit.Batch                                                                    as LotNumber,
+      lat.LatestArrayLot                                                           as LatestArrayLot,
+      lat.LatestArrayDeliveryDate                                                  as LatestArrayDeliveryDate,
+      dit.ReferenceSDDocument                                                      as SalesOrder,
+      dlv.ActualGoodsMovementDate                                                  as IssueDate,
+      cast( dats_days_between( dlv.ActualGoodsMovementDate, $session.system_date )
+            as abap.int4 )                                                         as DaysWithPatient,
+      prd.ProductType                                                              as ProductType,
+      pdt.ProductDescription                                                       as ProductDescription,
+      prd.ExternalProductGroup                                                     as ExternalProductGroup,
+      egt.ExternalProductGroupText                                                 as ExternalProductGroupText
 }
-where z.datbi = '99991231'
+where dit.Batch                  <> ''
+  and dit.Batch                  <> 'FIELDEQUIP'
+  and dlv.ActualGoodsMovementDate is not initial
+  and dlv.SoldToParty             is not initial
 ```
 
-- `ecc.Customer / ecc.Equipment` are the output keys. `SerialNumber`, `Material`, `Batch`, and `CreationDate` come straight from EQUI so they're always populated.
-- `ZI_PatientEquipmentDelivered` is LEFT OUTER. Equipment that can be back-traced to a patient-as-Sold-To delivery gets `SalesOrder` from the delivery trace. Equipment that *can't* (older deliveries shipped under a different Sold-To — insurance, parent BP, etc.) gets `null` for `SalesOrder`.
-- `LotNumber` and `IssueDate` use `coalesce` to fall back from the delivery trace to the EQUI/EQUZ source (the FM's `charge` and `datab` columns), so all 11 rows are populated for our test patient.
-- `CreatedDate` is `EQUI.ERDAT` (equipment master record creation), surfaced through the spine.
-- `ManufactureDate` joins `I_ClfnObjectCharcValForKeyDate` — the released parameterized view that resolves the classification value valid as of `$session.system_date`. Hardcoded filters bind to class type `002`, classifiable object `EQUI`, and characteristic internal ID `0000000151` (= `Z_DATE_OF_MANUFACTURE` in this system; verify via `I_ClfnCharacteristic` if needed). The actual date lives in either `CharcFromDate` (single-value characteristic) or `CharcToDate` (range upper bound); `coalesce` picks whichever the master-data setup populated. Equipment without a manufacture-date characteristic value returns `null`.
-- Both `CreatedDate` and `ManufactureDate` are exposed as native DATS — OData V4 serializes them as `Edm.Date` (YYYY-MM-DD in JSON). Switch to string-format only if a downstream consumer can't bind `Edm.Date` and needs the literal `cast(... as char(32)) + substring + concat` pattern from `ZI_EQUIPMENT` / `ZI_ORDER_DELIVERY_BATCH`.
-- Authorization check on the spine is `#NOT_REQUIRED` because `EQUI/EQUZ` carry no auth-relevant fields beyond what's already checked by the patient `BU_PARTNER` filter at the API layer.
+The view never aggregates — each delivery item is its own row. Equipment-only fields (`Equipment`, `SerialNumber`, `CreatedDate`, `ManufactureDate`) are not projected here; the top-level union view supplies them as initial values.
 
-#### Why not use `I_Equipment` (rejected attempt)
+---
 
-`I_Equipment` projects `Customer` from `EQUI.KUND2` (the header field). The FM reads `kund2` from `V_EQUI`, which projects `EQUZ.KUND2` (the time-dependent slice). These two diverge for equipment with assignment history — exactly the older inventory we were missing. There is no released CDS view in 2020 that exposes the EQUZ time-slice customer, so we have to wrap the classical tables ourselves. This wrap is the **only** classical-table dependency in the active chain; in a future RISE release where a released view exists, the wrap is a one-line swap.
+### 5.9. `ZC_CurrentInventoryByPatient` — consumption view (classic CDS, UNION ALL)
 
-The inner join drops every `ped` row whose equipment is no longer registered to the patient. The 2033 → 23 collapse happens here.
+```abap
+@AbapCatalog.sqlViewName: 'ZCCURRINVBYPAT'
+@AbapCatalog.compiler.compareFilter: true
+@AbapCatalog.preserveKey: true
+@AccessControl.authorizationCheck: #CHECK
+@EndUserText.label: 'Current Inventory by Patient (Equipment + Consumables)'
+@VDM.viewType: #CONSUMPTION
+@ClientHandling.algorithm: #SESSION_VARIABLE
+@ObjectModel.usageType: { serviceQuality: #D, sizeCategory: #S, dataClass: #MIXED }
+@Search.searchable: true
 
-`group by ped.Patient, ped.Equipment` and the `max(...)` wrappers remain for defensive uniqueness (each `(Patient, Equipment)` is already 1:1 by design; the wrappers absorb any unexpected fan-out from left outer joins on master data). Reads like a sledgehammer but costs nothing at HANA execution.
+define view ZC_CurrentInventoryByPatient
+  as select from ZI_PatientEquipmentInventory   as eq
+{
+      @Semantics.businessPartner.id: true
+      @Search.defaultSearchElement: true
+  key eq.Patient                                                                   as Patient,
+
+  key cast( concat( 'EQ/', eq.Equipment ) as abap.char(30) )                       as InventoryItemKey,
+
+      cast( 'EQUIPMENT' as abap.char(10) )                                         as RowType,
+
+      eq.Equipment, eq.SerialNumber, eq.Product,
+      @Semantics.batch.batchNumber: true
+      eq.LotNumber,
+      @Semantics.batch.batchNumber: true
+      eq.LatestArrayLot,
+      eq.LatestArrayDeliveryDate, eq.SalesOrder,
+      @Semantics.businessDate.from: true
+      eq.IssueDate,
+      eq.DaysWithPatient,
+      @Semantics.systemDate.createdAt: true
+      eq.CreatedDate,
+      @Semantics.businessDate.from: true
+      eq.ManufactureDate,
+      eq.ProductType, eq.ProductDescription, eq.ExternalProductGroup, eq.ExternalProductGroupText
+}
+
+union all
+
+  select from ZI_PatientConsumablesInventory     as cn
+{
+  key cn.Patient                                                                   as Patient,
+
+  key cast( concat( 'CN/',
+              concat( cn.DeliveryDocument,
+                concat( '/', cast( cn.DeliveryDocumentItem as abap.char(6) ) ) ) )
+          as abap.char(30) )                                                       as InventoryItemKey,
+
+      cast( 'CONSUMABLE' as abap.char(10) )                                        as RowType,
+
+      cast( '' as abap.char(18) )                                                  as Equipment,
+      cast( '' as abap.char(18) )                                                  as SerialNumber,
+      cn.Product, cn.LotNumber, cn.LatestArrayLot, cn.LatestArrayDeliveryDate,
+      cn.SalesOrder, cn.IssueDate, cn.DaysWithPatient,
+      cast( '00000000' as abap.dats )                                              as CreatedDate,
+      cast( '00000000' as abap.dats )                                              as ManufactureDate,
+      cn.ProductType, cn.ProductDescription, cn.ExternalProductGroup, cn.ExternalProductGroupText
+}
+```
+
+#### Why classic `define view` and not `define view entity`
+
+S/4HANA 2020 / NW 7.55 view entities **do not support UNION**. UNION in view entities was added in NW 7.56 (S/4HANA 2022). Since the business asked for a single endpoint returning both equipment and consumable rows, and we can't UNION in a view entity yet, the top of the stack drops down to classic CDS. The two helpers below (`ZI_PatientEquipmentInventory`, `ZI_PatientConsumablesInventory`) stay as view entities because they don't need UNION internally — they each return one row shape. Hybrid stacks of classic-on-top-of-view-entities are fully supported.
+
+After the 2023 RISE upgrade, this collapses to a single view entity (see Section 10).
+
+#### Key schema change vs the previous equipment-only view
+
+Old key: `(Patient, Equipment)` (e.g., `(0001041467, IBH291161)`).
+New key: `(Patient, InventoryItemKey)`. Synthetic `InventoryItemKey` disambiguates equipment from consumable rows:
+
+- Equipment row: `InventoryItemKey = 'EQ/' || Equipment` → `'EQ/IBH291161'`
+- Consumable row: `InventoryItemKey = 'CN/' || DeliveryDocument || '/' || DeliveryDocumentItem` → `'CN/80012345/000010'`
+
+`Equipment` is still a non-key column populated for `RowType = 'EQUIPMENT'` and empty for `RowType = 'CONSUMABLE'`. Direct-read OData URLs that used the old key segment need to be regenerated against the new key. This is a breaking change at the API contract level — flag with consumers before promoting.
+
+#### Expected row counts (patient 1041467)
+
+- Equipment rows: 11 (same as the FM and the previous equipment-only view).
+- Consumable rows: every PGI'd delivery item with `Batch ≠ 'FIELDEQUIP'` over the patient's history. Will likely be a multi-year list — pagination (`$top`, `$skip`) and `$filter=IssueDate ge ...` are the OData consumer's friends.
+- `RowType` makes a clean split: `$filter=RowType eq 'EQUIPMENT'` reproduces the old endpoint shape exactly, `$filter=RowType eq 'CONSUMABLE'` returns only consumables.
 
 ---
 
@@ -473,19 +576,34 @@ Create in ADT against `ZUI_CURRENT_INVENTORY` with type **OData V4 — Web API**
 
 ### Sample API calls
 
-List by patient:
+List by patient (everything):
 ```
 GET /sap/opu/odata4/sap/zui_current_inventory/srvd_a2x/sap/zui_current_inventory/0001/CurrentInventory
-    ?$filter=Patient eq '0000012345'
+    ?$filter=Patient eq '0001041467'
     &$orderby=IssueDate desc
 ```
 
-Direct read of one equipment for one patient:
+List by patient, equipment rows only:
 ```
-GET /sap/opu/odata4/sap/zui_current_inventory/srvd_a2x/sap/zui_current_inventory/0001/CurrentInventory(Patient='0000012345',Equipment='000000000010000123')
+GET /sap/opu/odata4/sap/zui_current_inventory/srvd_a2x/sap/zui_current_inventory/0001/CurrentInventory
+    ?$filter=Patient eq '0001041467' and RowType eq 'EQUIPMENT'
+    &$orderby=IssueDate desc
 ```
 
-> Consumers must pass `Patient` (and `Equipment` for key access) in **canonical SAP internal form (leading zeros)** — CDS field comparisons don't auto-apply ALPHA conversion. Document this in the API contract.
+List by patient, consumable rows only, last 12 months:
+```
+GET /sap/opu/odata4/sap/zui_current_inventory/srvd_a2x/sap/zui_current_inventory/0001/CurrentInventory
+    ?$filter=Patient eq '0001041467' and RowType eq 'CONSUMABLE' and IssueDate ge 2025-06-01
+    &$orderby=IssueDate desc
+```
+
+Direct read of one row (key = `(Patient, InventoryItemKey)`):
+```
+GET /sap/opu/odata4/sap/zui_current_inventory/srvd_a2x/sap/zui_current_inventory/0001/CurrentInventory(Patient='0001041467',InventoryItemKey='EQ/IBH291161')
+GET /sap/opu/odata4/sap/zui_current_inventory/srvd_a2x/sap/zui_current_inventory/0001/CurrentInventory(Patient='0001041467',InventoryItemKey='CN/80012345/000010')
+```
+
+> Consumers must pass `Patient` in **canonical SAP internal form (leading zeros)** — CDS field comparisons don't auto-apply ALPHA conversion. `InventoryItemKey` is a synthetic string; pass it exactly as returned by the list call. Document both on the API contract.
 
 ---
 
@@ -521,6 +639,9 @@ GET /sap/opu/odata4/sap/zui_current_inventory/srvd_a2x/sap/zui_current_inventory
    ```
    If yours returns something other than `0000000151`, update the literal in the `cv` join's `on` clause. Also confirm the characteristic is on equipment **class type `002`** (the standard SAP equipment class type) and that the equipment objects being queried are assigned to that class. Equipment without an assignment to the relevant class returns `null` for `ManufactureDate` — that's expected behavior, not an error.
 9. **`I_ClfnObjectCharcValForKeyDate` parameterized view authorization** — the released classification view performs its own auth checks against `S_CLASS` / `S_CLATTR`. The OData service runs under the calling user's auth context, so users without classification-read auth will see `null` `ManufactureDate` values even when data exists. If the API is consumed by a technical/service user, ensure that user has read access to class type `002`.
+10. **Classic CDS view activation order** — the top-level `ZC_CurrentInventoryByPatient` is now a *classic* `define view` (not `define view entity`). If you had previously activated it as a view entity, **delete the old view-entity object in ADT first**, then activate the new classic view. Same name, different DDIC object type. Activate the two helpers (`ZI_PatientEquipmentInventory`, `ZI_PatientConsumablesInventory`) before the classic view. After the classic view activates, re-activate the service definition and service binding to regenerate OData metadata with the new key (`Patient, InventoryItemKey`) and the new `RowType` column.
+11. **UNION ALL column-shape parity** — the equipment and consumable legs project identical column shapes by position. If a leg's source view changes (e.g., a field is renamed in `ZI_PatientEquipmentInventory`), the UNION view fails activation with a "type mismatch in select column N" message. The casts in the classic view (`abap.char(18)`, `abap.dats`, `abap.char(30)` for the synthetic key, etc.) exist explicitly to keep both legs aligned.
+12. **Consumable row volume** — the consumable leg returns one row per delivery item per patient. For a long-treated patient this can easily be hundreds or thousands of rows. Verify HANA push-down keeps `Patient` filter selective at the leaf level (`LIKP-KUNAG` is indexed); if `$filter=Patient eq 'X'` ever feels slow, consider adding a date guard (`IssueDate ge $session.system_date - 365` or similar) at the consumable helper's `where` clause.
 
 ---
 
@@ -537,8 +658,9 @@ Currently using `max( dit.ReferenceSDDocument )` = latest sales order (active co
 
 All artifacts above are 2020-compatible and survive the upgrade unchanged. Post-upgrade actions:
 
-1. Re-check `RAP_BO_RELEASED_API` / ADT *Released Objects* — if SAP releases `I_ExternalProductGroupText` (or equivalents for OBJK/SER01/SER03 linkages), retire the matching `Z` basic wraps and rewire the joins.
-2. Run ATC with the Cloud-readiness variant to confirm Cloud language compatibility if any objects need promoting.
+1. **Collapse the classic UNION view back into a view entity.** NW 7.56+ (S/4HANA 2022, 2023) supports `union all` natively in `define view entity`. The hybrid stack (`ZC_*` classic view over `ZI_*` view-entity helpers) can be flattened back into a single `ZC_CurrentInventoryByPatient` view entity that contains the UNION inline. The two helpers (`ZI_PatientEquipmentInventory`, `ZI_PatientConsumablesInventory`) can either be inlined or kept as composites — composites are still useful for testability. Deleting `@AbapCatalog.sqlViewName` and switching `define view` to `define view entity` is the main change.
+2. Re-check `RAP_BO_RELEASED_API` / ADT *Released Objects* — if SAP releases `I_ExternalProductGroupText` (or equivalents for OBJK/SER01/SER03 linkages), retire the matching `Z` basic wraps and rewire the joins.
+3. Run ATC with the Cloud-readiness variant to confirm Cloud language compatibility if any objects need promoting.
 3. Confirm edition with basis team — Private Cloud Edition (typical RISE) preserves classic ABAP + `Z*`; Public Cloud Edition would force a different sourcing strategy for any non-released table access.
 
 ### Pre-emptive work that pays off

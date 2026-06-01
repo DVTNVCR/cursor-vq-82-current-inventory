@@ -1,79 +1,85 @@
+@AbapCatalog.sqlViewName: 'ZCCURRINVBYPAT'
+@AbapCatalog.compiler.compareFilter: true
+@AbapCatalog.preserveKey: true
 @AccessControl.authorizationCheck: #CHECK
-@EndUserText.label: 'Current Inventory by Patient'
+@EndUserText.label: 'Current Inventory by Patient (Equipment + Consumables)'
 @VDM.viewType: #CONSUMPTION
 @ClientHandling.algorithm: #SESSION_VARIABLE
 @ObjectModel.usageType: { serviceQuality: #D, sizeCategory: #S, dataClass: #MIXED }
 @Search.searchable: true
 
-define view entity ZC_CurrentInventoryByPatient
-  as select from ZI_EquipmentCurrentInstall        as ecc
+/* Classic CDS view (define view, not view entity) because view entities in
+   S/4HANA 2020 / NW 7.55 do not support UNION. After the 2023 RISE upgrade
+   (NW 7.56+) this can be collapsed back into a single `define view entity`
+   with native union support — see updated_design.md Section 10. */
 
-    left outer join ZI_PatientEquipmentDelivered   as ped
-      on  ped.Patient   = ecc.Customer
-      and ped.Equipment = ecc.Equipment
-
-    left outer join ZI_PatientLatestArrayLot       as lat
-      on lat.Patient = ecc.Customer
-
-    left outer join I_Product                      as prd
-      on prd.Product = ecc.Material
-
-    left outer join I_ProductDescription           as pdt
-      on  pdt.Product  = ecc.Material
-      and pdt.Language = $session.system_language
-
-    left outer join ZI_ExternalProductGroupText    as egt
-      on  egt.ExternalProductGroup = prd.ExternalProductGroup
-      and egt.Language             = $session.system_language
-
-    /* Classification characteristic 'Z_DATE_OF_MANUFACTURE' (internal ID 0000000151)
-       on equipment class type 002 — date value lives in CharcFromDate (single-value
-       characteristic) or CharcToDate (range upper bound) depending on master-data setup. */
-    left outer join I_ClfnObjectCharcValForKeyDate( P_KeyDate: $session.system_date ) as cv
-      on  cv.ClfnObjectTable = 'EQUI'
-      and cv.ClassType       = '002'
-      and cv.ClfnObjectID    = ecc.Equipment
-      and cv.CharcInternalID = '0000000151'
-
+define view ZC_CurrentInventoryByPatient
+  as select from ZI_PatientEquipmentInventory   as eq
 {
-  @Semantics.businessPartner.id: true
-  @Search.defaultSearchElement: true
-  key ecc.Customer                                                                 as Patient,
+      @Semantics.businessPartner.id: true
+      @Search.defaultSearchElement: true
+  key eq.Patient                                                                   as Patient,
 
-  key ecc.Equipment                                                                as Equipment,
+  key cast( concat( 'EQ/', eq.Equipment ) as abap.char(30) )                       as InventoryItemKey,
 
-      max( ecc.SerialNumber )                                                      as SerialNumber,
+      cast( 'EQUIPMENT' as abap.char(10) )                                         as RowType,
 
-      ltrim( max( ecc.Material ), '0' )                                            as Product,
+      eq.Equipment                                                                 as Equipment,
+      eq.SerialNumber                                                              as SerialNumber,
+      eq.Product                                                                   as Product,
 
       @Semantics.batch.batchNumber: true
-      coalesce( max( ped.Batch ), max( ecc.Batch ) )                               as LotNumber,
+      eq.LotNumber                                                                 as LotNumber,
 
       @Semantics.batch.batchNumber: true
-      max( lat.LatestArrayLot )                                                    as LatestArrayLot,
+      eq.LatestArrayLot                                                            as LatestArrayLot,
 
-      max( lat.LatestArrayDeliveryDate )                                           as LatestArrayDeliveryDate,
-
-      max( ped.SalesOrder )                                                        as SalesOrder,
+      eq.LatestArrayDeliveryDate                                                   as LatestArrayDeliveryDate,
+      eq.SalesOrder                                                                as SalesOrder,
 
       @Semantics.businessDate.from: true
-      coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) )         as IssueDate,
+      eq.IssueDate                                                                 as IssueDate,
 
-      cast( dats_days_between(
-              coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) ),
-              $session.system_date
-            ) as abap.int4 )                                                       as DaysWithPatient,
+      eq.DaysWithPatient                                                           as DaysWithPatient,
 
       @Semantics.systemDate.createdAt: true
-      max( ecc.CreationDate )                                                      as CreatedDate,
+      eq.CreatedDate                                                               as CreatedDate,
 
       @Semantics.businessDate.from: true
-      max( coalesce( cv.CharcFromDate, cv.CharcToDate ) )                          as ManufactureDate,
+      eq.ManufactureDate                                                           as ManufactureDate,
 
-      max( prd.ProductType )                                                       as ProductType,
-      max( pdt.ProductDescription )                                                as ProductDescription,
-      max( prd.ExternalProductGroup )                                              as ExternalProductGroup,
-      max( egt.ExternalProductGroupText )                                          as ExternalProductGroupText
+      eq.ProductType                                                               as ProductType,
+      eq.ProductDescription                                                        as ProductDescription,
+      eq.ExternalProductGroup                                                      as ExternalProductGroup,
+      eq.ExternalProductGroupText                                                  as ExternalProductGroupText
 }
-where ecc.Customer is not initial
-group by ecc.Customer, ecc.Equipment
+
+union all
+
+  select from ZI_PatientConsumablesInventory     as cn
+{
+  key cn.Patient                                                                   as Patient,
+
+  key cast( concat( 'CN/',
+              concat( cn.DeliveryDocument,
+                concat( '/', cast( cn.DeliveryDocumentItem as abap.char(6) ) ) ) )
+          as abap.char(30) )                                                       as InventoryItemKey,
+
+      cast( 'CONSUMABLE' as abap.char(10) )                                        as RowType,
+
+      cast( '' as abap.char(18) )                                                  as Equipment,
+      cast( '' as abap.char(18) )                                                  as SerialNumber,
+      cn.Product                                                                   as Product,
+      cn.LotNumber                                                                 as LotNumber,
+      cn.LatestArrayLot                                                            as LatestArrayLot,
+      cn.LatestArrayDeliveryDate                                                   as LatestArrayDeliveryDate,
+      cn.SalesOrder                                                                as SalesOrder,
+      cn.IssueDate                                                                 as IssueDate,
+      cn.DaysWithPatient                                                           as DaysWithPatient,
+      cast( '00000000' as abap.dats )                                              as CreatedDate,
+      cast( '00000000' as abap.dats )                                              as ManufactureDate,
+      cn.ProductType                                                               as ProductType,
+      cn.ProductDescription                                                        as ProductDescription,
+      cn.ExternalProductGroup                                                      as ExternalProductGroup,
+      cn.ExternalProductGroupText                                                  as ExternalProductGroupText
+}
