@@ -1,11 +1,11 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
 @AccessControl.authorizationCheck: #NOT_REQUIRED
-@EndUserText.label: 'External Product Group Text'
-@VDM.viewType: #BASIC
-
+@EndUserText.label: 'External Product Group Tex'
+@Metadata.ignorePropagatedAnnotations: true
 define view entity ZI_ExternalProductGroupText
   as select from twewt
 {
-  key extwg    as ExternalProductGroup,
-  key spras    as Language,
-      ewbez    as ExternalProductGroupText
+  key extwg as ExternalProductGroup,
+  key spras as Language,
+      ewbez as ExternalProductGroupText
 }

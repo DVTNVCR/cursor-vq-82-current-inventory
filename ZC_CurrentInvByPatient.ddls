@@ -2,55 +2,34 @@
 @AbapCatalog.compiler.compareFilter: true
 @AbapCatalog.preserveKey: true
 @AccessControl.authorizationCheck: #CHECK
-@EndUserText.label: 'Current Inventory by Patient (Equipment + Consumables)'
+@EndUserText.label: 'Current Inventory by Patient'
 @VDM.viewType: #CONSUMPTION
 @ClientHandling.algorithm: #SESSION_VARIABLE
 @ObjectModel.usageType: { serviceQuality: #D, sizeCategory: #S, dataClass: #MIXED }
-@Search.searchable: true
 
-/* Classic CDS view (define view, not view entity) because view entities in
-   S/4HANA 2020 / NW 7.55 do not support UNION. After the 2023 RISE upgrade
-   (NW 7.56+) this can be collapsed back into a single `define view entity`
-   with native union support — see updated_design.md Section 10. */
-
+/* To use the union feature on a 2020 system, we have to go with the classic define view instead of
+   define view entity.
+   This should be refactored when we upgrade to 2023  */
 define view ZC_CurrentInvByPatient
-  as select from ZI_PatientEquipmentInventory   as eq
+  as select from ZI_PatientEquipmentInventory as eq
 {
-      @Semantics.businessPartner.id: true
-      @Search.defaultSearchElement: true
+
   key eq.Patient                                                                   as Patient,
-
-  key cast( concat( 'EQ/', eq.Equipment ) as abap.char(30) )                       as InventoryItemKey,
-
+      //  key cast( concat( 'EQ/', eq.Equipment ) as abap.char(30) )                       as InventoryItemKey,
       cast( 'EQUIPMENT' as abap.char(20) )                                         as SourceType,
-
       eq.Equipment                                                                 as Equipment,
       eq.SerialNumber                                                              as SerialNumber,
       eq.Product                                                                   as Product,
-
-      @Semantics.batch.batchNumber: true
       eq.LotNumber                                                                 as LotNumber,
-
-      @Semantics.batch.batchNumber: true
       eq.LatestArrayLot                                                            as LatestArrayLot,
-
       eq.LatestArrayDeliveryDate                                                   as LatestArrayDeliveryDate,
       eq.SalesOrder                                                                as SalesOrder,
-
-      @Semantics.businessDate.from: true
       eq.IssueDate                                                                 as IssueDate,
-
       eq.DaysWithPatient                                                           as DaysWithPatient,
-
-      @Semantics.systemDate.createdAt: true
-      eq.CreatedDate                                                               as CreatedDate,
-
-      @Semantics.systemDate.createdAt: true
-      eq.SalesOrderCreatedDate                                                     as SalesOrderCreatedDate,
-
-      @Semantics.businessDate.from: true
-      eq.ManufactureDate                                                           as ManufactureDate,
-
+      concat(substring(cast(eq.CreatedDate as abap.char(32)),1,4),concat('-',concat(substring(cast(eq.CreatedDate as abap.char(32)),5,2),
+      concat('-',substring(cast(eq.CreatedDate as abap.char(32)),7,2)))))          as CreatedDate,
+      concat(substring(cast(eq.ManufactureDate as abap.char(32)),1,4),concat('-',concat(substring(cast(eq.ManufactureDate as abap.char(32)),5,2),
+           concat('-',substring(cast(eq.ManufactureDate as abap.char(32)),7,2))))) as ManufactureDate,
       eq.ProductType                                                               as ProductType,
       eq.ProductDescription                                                        as ProductDescription,
       eq.ExternalProductGroup                                                      as ExternalProductGroup,
@@ -59,14 +38,14 @@ define view ZC_CurrentInvByPatient
 
 union all
 
-  select from ZI_PatientDeliveryBatch            as db
+select from ZI_PatientDeliveryBatch            as db
 {
   key db.Patient                                                                   as Patient,
 
-  key cast( concat( 'CN/',
-              concat( db.DeliveryDocument,
-                concat( '/', cast( db.DeliveryDocumentItem as abap.char(6) ) ) ) )
-          as abap.char(30) )                                                       as InventoryItemKey,
+//  key cast( concat( 'CN/',
+//              concat( db.DeliveryDocument,
+//                concat( '/', cast( db.DeliveryDocumentItem as abap.char(6) ) ) ) )
+//          as abap.char(30) )                                                       as InventoryItemKey,
 
       cast( 'DELIVERY_BATCH' as abap.char(20) )                                    as SourceType,
 
@@ -79,11 +58,11 @@ union all
       db.SalesOrder                                                                as SalesOrder,
       db.IssueDate                                                                 as IssueDate,
       db.DaysWithPatient                                                           as DaysWithPatient,
-      cast( '00000000' as abap.dats )                                              as CreatedDate,
-      db.SalesOrderCreatedDate                                                     as SalesOrderCreatedDate,
-      cast( '00000000' as abap.dats )                                              as ManufactureDate,
+       concat(substring(cast(db.CreatedDate as abap.char(32)),1,4),concat('-',concat(substring(cast(db.CreatedDate as abap.char(32)),5,2),
+      concat('-',substring(cast(db.CreatedDate as abap.char(32)),7,2))))) as CreatedDate,
+      cast( '' as abap.dats )                                              as ManufactureDate,
       db.ProductType                                                               as ProductType,
       db.ProductDescription                                                        as ProductDescription,
       db.ExternalProductGroup                                                      as ExternalProductGroup,
       db.ExternalProductGroupText                                                  as ExternalProductGroupText
-}
+}      

@@ -1,63 +1,60 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
 @AccessControl.authorizationCheck: #NOT_REQUIRED
-@EndUserText.label: 'Patient Equipment Inventory (Path C leg)'
+@EndUserText.label: 'Patient Equipment Inventory'
 @VDM.viewType: #COMPOSITE
 @Metadata.ignorePropagatedAnnotations: true
 
 define view entity ZI_PatientEquipmentInventory
-  as select from ZI_EquipmentCurrentInstall        as ecc
+  as select from    ZI_EquipmentCurrentInstall                                        as ecc
 
-    left outer join ZI_PatientEquipmentDelivered   as ped
-      on  ped.Patient   = ecc.Customer
-      and ped.Equipment = ecc.Equipment
+    left outer join ZI_PatientEquipmentDelivered                                      as ped on  ped.Patient   = ecc.Customer
+                                                                                             and ped.Equipment = ecc.Equipment
 
-    left outer join I_SalesOrder                   as so
-      on so.SalesOrder = ped.SalesOrder
+    left outer join I_SalesOrder                                                      as so  on so.SalesOrder = ped.SalesOrder
 
-    left outer join ZI_PatientLatestArrayLot       as lat
-      on lat.Patient = ecc.Customer
+    left outer join ZI_PatientLatestArrayLot                                          as lat on lat.Patient = ecc.Customer
 
-    left outer join I_Product                      as prd
-      on prd.Product = ecc.Material
+    left outer join I_Product                                                         as prd on prd.Product = ecc.Material
 
-    left outer join I_ProductDescription           as pdt
-      on  pdt.Product  = ecc.Material
-      and pdt.Language = $session.system_language
+    left outer join I_ProductDescription                                              as pdt on  pdt.Product  = ecc.Material
+                                                                                             and pdt.Language = $session.system_language
 
-    left outer join ZI_ExternalProductGroupText    as egt
-      on  egt.ExternalProductGroup = prd.ExternalProductGroup
-      and egt.Language             = $session.system_language
+    left outer join ZI_ExternalProductGroupText                                       as egt on  egt.ExternalProductGroup = prd.ExternalProductGroup
+                                                                                             and egt.Language             = $session.system_language
 
-    /* Classification characteristic 'Z_DATE_OF_MANUFACTURE' (internal ID 0000000151)
-       on equipment class type 002 — date value lives in CharcFromDate (single-value
-       characteristic) or CharcToDate (range upper bound) depending on master-data setup. */
-    left outer join I_ClfnObjectCharcValForKeyDate( P_KeyDate: $session.system_date ) as cv
-      on  cv.ClfnObjectTable = 'EQUI'
-      and cv.ClassType       = '002'
-      and cv.ClfnObjectID    = ecc.Equipment
-      and cv.CharcInternalID = '0000000151'
+  /* Classification characteristic 'Z_DATE_OF_MANUFACTURE' (internal ID 0000000151)
+     on equipment class type 002 — date value lives in CharcFromDate (single-value
+     characteristic) or CharcToDate (range upper bound) depending on master-data setup. */
+    left outer join I_ClfnObjectCharcValForKeyDate( P_KeyDate: $session.system_date ) as cv  on  cv.ClfnObjectTable = 'EQUI'
+                                                                                             and cv.ClassType       = '002'
+                                                                                             and cv.ClfnObjectID    = ecc.Equipment
+                                                                                             and cv.CharcInternalID = '0000000151'
 
 {
-  key ecc.Customer                                                                 as Patient,
-  key ecc.Equipment                                                                as Equipment,
+  key ecc.Customer                                                         as Patient,
+  key ecc.Equipment                                                        as Equipment,
 
-      max( ecc.SerialNumber )                                                      as SerialNumber,
-      ltrim( max( ecc.Material ), '0' )                                            as Product,
-      coalesce( max( ped.Batch ), max( ecc.Batch ) )                               as LotNumber,
-      max( lat.LatestArrayLot )                                                    as LatestArrayLot,
-      max( lat.LatestArrayDeliveryDate )                                           as LatestArrayDeliveryDate,
-      ltrim( max( ped.SalesOrder ), '0' )                                          as SalesOrder,
-      coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) )         as IssueDate,
+      max( ecc.SerialNumber )                                              as SerialNumber,
+      ltrim( max( ecc.Material ), '0' )                                    as Product,
+      coalesce( max( ped.Batch ), max( ecc.Batch ) )                       as LotNumber,
+      max( lat.LatestArrayLot )                                            as LatestArrayLot,
+      max( lat.LatestArrayDeliveryDate )                                   as LatestArrayDeliveryDate,
+      ltrim( max( ped.SalesOrder ), '0' )                                  as SalesOrder,
+      coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) ) as IssueDate,
       cast( dats_days_between(
               coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) ),
               $session.system_date
-            ) as abap.int4 )                                                       as DaysWithPatient,
-      max( ecc.CreationDate )                                                      as CreatedDate,
-      max( so.CreationDate )                                                       as SalesOrderCreatedDate,
-      max( coalesce( cv.CharcFromDate, cv.CharcToDate ) )                          as ManufactureDate,
-      max( prd.ProductType )                                                       as ProductType,
-      max( pdt.ProductDescription )                                                as ProductDescription,
-      max( prd.ExternalProductGroup )                                              as ExternalProductGroup,
-      max( egt.ExternalProductGroupText )                                          as ExternalProductGroupText
+            ) as abap.int4 )                                               as DaysWithPatient,
+      max( ecc.CreationDate )                                              as CreatedDate,
+      max( so.CreationDate )                                               as SalesOrderCreatedDate,
+      max( coalesce( cv.CharcFromDate, cv.CharcToDate ) )                  as ManufactureDate,
+      max( prd.ProductType )                                               as ProductType,
+      max( pdt.ProductDescription )                                        as ProductDescription,
+      max( prd.ExternalProductGroup )                                      as ExternalProductGroup,
+      max( egt.ExternalProductGroupText )                                  as ExternalProductGroupText
 }
-where ecc.Customer is not initial
-group by ecc.Customer, ecc.Equipment
+where
+  ecc.Customer is not initial
+group by
+  ecc.Customer,
+  ecc.Equipment

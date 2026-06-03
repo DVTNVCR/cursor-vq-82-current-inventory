@@ -1,22 +1,21 @@
+@AbapCatalog.viewEnhancementCategory: [ #NONE ]
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Patient Latest Array Lot Delivered'
+@Metadata.ignorePropagatedAnnotations: true
 @VDM.viewType: #COMPOSITE
-
 define view entity ZI_PatientLatestArrayLot
-  as select from    I_DeliveryDocument        as dlv
-    inner join      I_DeliveryDocumentItem    as dit
-      on dit.DeliveryDocument = dlv.DeliveryDocument
+  as select from I_DeliveryDocument     as dlv
+    inner join   I_DeliveryDocumentItem as dit on dit.DeliveryDocument = dlv.DeliveryDocument
 {
-  key dlv.SoldToParty                                                                          as Patient,
-
-      max( dlv.ActualGoodsMovementDate )                                                       as LatestArrayDeliveryDate,
-
+  key dlv.SoldToParty                  as Patient,
+      max(dlv.ActualGoodsMovementDate) as LatestArrayDeliveryDate,
       substring(
-        max( concat( cast( dlv.ActualGoodsMovementDate as abap.char(8)  ),
-                     cast( dit.Batch                   as abap.char(10) ) ) ),
-        9, 10 )                                                                                as LatestArrayLot
+        max(concat(cast(dlv.ActualGoodsMovementDate as abap.char(8)),
+                   cast(dit.Batch                   as abap.char(10)))),
+        9, 10)                         as LatestArrayLot
 }
-where dlv.ActualGoodsMovementDate is not initial
+where
+      dlv.ActualGoodsMovementDate is not initial
   and dit.Batch                   is not initial
-  and dit.Batch                  <> 'FIELDEQUIP'
-group by dlv.SoldToParty
+group by
+  dlv.SoldToParty
