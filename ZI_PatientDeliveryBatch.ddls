@@ -1,13 +1,16 @@
 @AccessControl.authorizationCheck: #NOT_REQUIRED
-@EndUserText.label: 'Patient Consumables Inventory'
+@EndUserText.label: 'Patient Delivery Batches'
 @VDM.viewType: #COMPOSITE
 @Metadata.ignorePropagatedAnnotations: true
 
-define view entity ZI_PatientConsumablesInventory
+define view entity ZI_PatientDeliveryBatch
   as select from    I_DeliveryDocument           as dlv
 
     inner join      I_DeliveryDocumentItem       as dit
       on dit.DeliveryDocument = dlv.DeliveryDocument
+
+    left outer join I_SalesOrder                 as so
+      on so.SalesOrder = dit.ReferenceSDDocument
 
     left outer join ZI_PatientLatestArrayLot     as lat
       on lat.Patient = dlv.SoldToParty
@@ -32,10 +35,11 @@ define view entity ZI_PatientConsumablesInventory
       dit.Batch                                                                    as LotNumber,
       lat.LatestArrayLot                                                           as LatestArrayLot,
       lat.LatestArrayDeliveryDate                                                  as LatestArrayDeliveryDate,
-      dit.ReferenceSDDocument                                                      as SalesOrder,
+      ltrim( dit.ReferenceSDDocument, '0' )                                        as SalesOrder,
       dlv.ActualGoodsMovementDate                                                  as IssueDate,
       cast( dats_days_between( dlv.ActualGoodsMovementDate, $session.system_date )
             as abap.int4 )                                                         as DaysWithPatient,
+      so.CreationDate                                                              as SalesOrderCreatedDate,
       prd.ProductType                                                              as ProductType,
       pdt.ProductDescription                                                       as ProductDescription,
       prd.ExternalProductGroup                                                     as ExternalProductGroup,

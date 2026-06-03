@@ -10,6 +10,9 @@ define view entity ZI_PatientEquipmentInventory
       on  ped.Patient   = ecc.Customer
       and ped.Equipment = ecc.Equipment
 
+    left outer join I_SalesOrder                   as so
+      on so.SalesOrder = ped.SalesOrder
+
     left outer join ZI_PatientLatestArrayLot       as lat
       on lat.Patient = ecc.Customer
 
@@ -42,13 +45,14 @@ define view entity ZI_PatientEquipmentInventory
       coalesce( max( ped.Batch ), max( ecc.Batch ) )                               as LotNumber,
       max( lat.LatestArrayLot )                                                    as LatestArrayLot,
       max( lat.LatestArrayDeliveryDate )                                           as LatestArrayDeliveryDate,
-      max( ped.SalesOrder )                                                        as SalesOrder,
+      ltrim( max( ped.SalesOrder ), '0' )                                          as SalesOrder,
       coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) )         as IssueDate,
       cast( dats_days_between(
               coalesce( max( ped.EarliestPgiDate ), max( ecc.ValidityStartDate ) ),
               $session.system_date
             ) as abap.int4 )                                                       as DaysWithPatient,
       max( ecc.CreationDate )                                                      as CreatedDate,
+      max( so.CreationDate )                                                       as SalesOrderCreatedDate,
       max( coalesce( cv.CharcFromDate, cv.CharcToDate ) )                          as ManufactureDate,
       max( prd.ProductType )                                                       as ProductType,
       max( pdt.ProductDescription )                                                as ProductDescription,

@@ -13,7 +13,7 @@
    (NW 7.56+) this can be collapsed back into a single `define view entity`
    with native union support — see updated_design.md Section 10. */
 
-define view ZC_CurrentInventoryByPatient
+define view ZC_CurrentInvByPatient
   as select from ZI_PatientEquipmentInventory   as eq
 {
       @Semantics.businessPartner.id: true
@@ -22,7 +22,7 @@ define view ZC_CurrentInventoryByPatient
 
   key cast( concat( 'EQ/', eq.Equipment ) as abap.char(30) )                       as InventoryItemKey,
 
-      cast( 'EQUIPMENT' as abap.char(10) )                                         as RowType,
+      cast( 'EQUIPMENT' as abap.char(20) )                                         as SourceType,
 
       eq.Equipment                                                                 as Equipment,
       eq.SerialNumber                                                              as SerialNumber,
@@ -45,6 +45,9 @@ define view ZC_CurrentInventoryByPatient
       @Semantics.systemDate.createdAt: true
       eq.CreatedDate                                                               as CreatedDate,
 
+      @Semantics.systemDate.createdAt: true
+      eq.SalesOrderCreatedDate                                                     as SalesOrderCreatedDate,
+
       @Semantics.businessDate.from: true
       eq.ManufactureDate                                                           as ManufactureDate,
 
@@ -56,30 +59,31 @@ define view ZC_CurrentInventoryByPatient
 
 union all
 
-  select from ZI_PatientConsumablesInventory     as cn
+  select from ZI_PatientDeliveryBatch            as db
 {
-  key cn.Patient                                                                   as Patient,
+  key db.Patient                                                                   as Patient,
 
   key cast( concat( 'CN/',
-              concat( cn.DeliveryDocument,
-                concat( '/', cast( cn.DeliveryDocumentItem as abap.char(6) ) ) ) )
+              concat( db.DeliveryDocument,
+                concat( '/', cast( db.DeliveryDocumentItem as abap.char(6) ) ) ) )
           as abap.char(30) )                                                       as InventoryItemKey,
 
-      cast( 'CONSUMABLE' as abap.char(10) )                                        as RowType,
+      cast( 'DELIVERY_BATCH' as abap.char(20) )                                    as SourceType,
 
       cast( '' as abap.char(18) )                                                  as Equipment,
       cast( '' as abap.char(18) )                                                  as SerialNumber,
-      cn.Product                                                                   as Product,
-      cn.LotNumber                                                                 as LotNumber,
-      cn.LatestArrayLot                                                            as LatestArrayLot,
-      cn.LatestArrayDeliveryDate                                                   as LatestArrayDeliveryDate,
-      cn.SalesOrder                                                                as SalesOrder,
-      cn.IssueDate                                                                 as IssueDate,
-      cn.DaysWithPatient                                                           as DaysWithPatient,
+      db.Product                                                                   as Product,
+      db.LotNumber                                                                 as LotNumber,
+      db.LatestArrayLot                                                            as LatestArrayLot,
+      db.LatestArrayDeliveryDate                                                   as LatestArrayDeliveryDate,
+      db.SalesOrder                                                                as SalesOrder,
+      db.IssueDate                                                                 as IssueDate,
+      db.DaysWithPatient                                                           as DaysWithPatient,
       cast( '00000000' as abap.dats )                                              as CreatedDate,
+      db.SalesOrderCreatedDate                                                     as SalesOrderCreatedDate,
       cast( '00000000' as abap.dats )                                              as ManufactureDate,
-      cn.ProductType                                                               as ProductType,
-      cn.ProductDescription                                                        as ProductDescription,
-      cn.ExternalProductGroup                                                      as ExternalProductGroup,
-      cn.ExternalProductGroupText                                                  as ExternalProductGroupText
+      db.ProductType                                                               as ProductType,
+      db.ProductDescription                                                        as ProductDescription,
+      db.ExternalProductGroup                                                      as ExternalProductGroup,
+      db.ExternalProductGroupText                                                  as ExternalProductGroupText
 }
