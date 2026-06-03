@@ -1,0 +1,68 @@
+@AbapCatalog.sqlViewName: 'ZCCURRINVBYPAT'
+@AbapCatalog.compiler.compareFilter: true
+@AbapCatalog.preserveKey: true
+@AccessControl.authorizationCheck: #CHECK
+@EndUserText.label: 'Current Inventory by Patient'
+@VDM.viewType: #CONSUMPTION
+@ClientHandling.algorithm: #SESSION_VARIABLE
+@ObjectModel.usageType: { serviceQuality: #D, sizeCategory: #S, dataClass: #MIXED }
+
+/* To use the union feature on a 2020 system, we have to go with the classic define view instead of
+   define view entity.
+   This should be refactored when we upgrade to 2023  */
+define view ZC_CurrentInvByPatient
+  as select from ZI_PatientEquipmentInventory as eq
+{
+
+  key eq.Patient                                                                   as Patient,
+      //  key cast( concat( 'EQ/', eq.Equipment ) as abap.char(30) )                       as InventoryItemKey,
+      cast( 'EQUIPMENT' as abap.char(20) )                                         as SourceType,
+      eq.Equipment                                                                 as Equipment,
+      eq.SerialNumber                                                              as SerialNumber,
+      eq.Product                                                                   as Product,
+      eq.LotNumber                                                                 as LotNumber,
+      eq.LatestArrayLot                                                            as LatestArrayLot,
+      eq.LatestArrayDeliveryDate                                                   as LatestArrayDeliveryDate,
+      eq.SalesOrder                                                                as SalesOrder,
+      eq.IssueDate                                                                 as IssueDate,
+      eq.DaysWithPatient                                                           as DaysWithPatient,
+      concat(substring(cast(eq.CreatedDate as abap.char(32)),1,4),concat('-',concat(substring(cast(eq.CreatedDate as abap.char(32)),5,2),
+      concat('-',substring(cast(eq.CreatedDate as abap.char(32)),7,2)))))          as CreatedDate,
+      concat(substring(cast(eq.ManufactureDate as abap.char(32)),1,4),concat('-',concat(substring(cast(eq.ManufactureDate as abap.char(32)),5,2),
+           concat('-',substring(cast(eq.ManufactureDate as abap.char(32)),7,2))))) as ManufactureDate,
+      eq.ProductType                                                               as ProductType,
+      eq.ProductDescription                                                        as ProductDescription,
+      eq.ExternalProductGroup                                                      as ExternalProductGroup,
+      eq.ExternalProductGroupText                                                  as ExternalProductGroupText
+}
+
+union all
+
+select from ZI_PatientDeliveryBatch            as db
+{
+  key db.Patient                                                                   as Patient,
+
+//  key cast( concat( 'CN/',
+//              concat( db.DeliveryDocument,
+//                concat( '/', cast( db.DeliveryDocumentItem as abap.char(6) ) ) ) )
+//          as abap.char(30) )                                                       as InventoryItemKey,
+
+      cast( 'DELIVERY_BATCH' as abap.char(20) )                                    as SourceType,
+
+      cast( '' as abap.char(18) )                                                  as Equipment,
+      cast( '' as abap.char(18) )                                                  as SerialNumber,
+      db.Product                                                                   as Product,
+      db.LotNumber                                                                 as LotNumber,
+      db.LatestArrayLot                                                            as LatestArrayLot,
+      db.LatestArrayDeliveryDate                                                   as LatestArrayDeliveryDate,
+      db.SalesOrder                                                                as SalesOrder,
+      db.IssueDate                                                                 as IssueDate,
+      db.DaysWithPatient                                                           as DaysWithPatient,
+       concat(substring(cast(db.CreatedDate as abap.char(32)),1,4),concat('-',concat(substring(cast(db.CreatedDate as abap.char(32)),5,2),
+      concat('-',substring(cast(db.CreatedDate as abap.char(32)),7,2))))) as CreatedDate,
+      cast( '' as abap.dats )                                              as ManufactureDate,
+      db.ProductType                                                               as ProductType,
+      db.ProductDescription                                                        as ProductDescription,
+      db.ExternalProductGroup                                                      as ExternalProductGroup,
+      db.ExternalProductGroupText                                                  as ExternalProductGroupText
+}      

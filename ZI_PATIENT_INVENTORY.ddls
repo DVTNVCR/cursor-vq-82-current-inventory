@@ -1,0 +1,26 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Patient Inventory'
+@Metadata.ignorePropagatedAnnotations: true
+define view entity ZI_PATIENT_INVENTORY
+  as select from ZC_CurrentInvByPatient
+{
+  key Patient as partnerId,
+//  key InventoryItemKey,
+      SourceType,
+      Equipment as equipmentId,
+      SerialNumber,
+      Product  as materialId,
+      LotNumber,
+      LatestArrayLot,
+      LatestArrayDeliveryDate,
+      SalesOrder as orderId,
+      IssueDate,
+//      DaysWithPatient,
+      CreatedDate as createdDate,
+      ManufactureDate as manufactureDate,
+      ProductType as materialType,
+      ProductDescription as materialName
+//      ExternalProductGroup,
+//      ExternalProductGroupText
+}

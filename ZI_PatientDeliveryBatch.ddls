@@ -1,0 +1,42 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Patient Consumables Inventory'
+@VDM.viewType: #COMPOSITE
+@Metadata.ignorePropagatedAnnotations: true
+
+define view entity ZI_PatientDeliveryBatch
+  as select from    I_DeliveryDocument          as dlv
+    inner join      I_DeliveryDocumentItem      as dit on dit.DeliveryDocument = dlv.DeliveryDocument
+    left outer join I_SalesOrder                as so  on so.SalesOrder = dit.ReferenceSDDocument
+    left outer join ZI_PatientLatestArrayLot    as lat on lat.Patient = dlv.SoldToParty
+    left outer join I_Product                   as prd on prd.Product = dit.Material
+    left outer join I_ProductDescription        as pdt on  pdt.Product  = dit.Material
+                                                       and pdt.Language = $session.system_language
+    left outer join ZI_ExternalProductGroupText as egt on  egt.ExternalProductGroup = prd.ExternalProductGroup
+                                                       and egt.Language             = $session.system_language
+
+{
+  key dlv.SoldToParty                       as Patient,
+  key dlv.DeliveryDocument                  as DeliveryDocument,
+  key dit.DeliveryDocumentItem              as DeliveryDocumentItem,
+
+      ltrim( dit.Material, '0' )            as Product,
+      dit.Batch                             as LotNumber,
+      lat.LatestArrayLot                    as LatestArrayLot,
+      lat.LatestArrayDeliveryDate           as LatestArrayDeliveryDate,
+      ltrim( dit.ReferenceSDDocument, '0' ) as SalesOrder,
+      dlv.ActualGoodsMovementDate           as IssueDate,
+      cast( dats_days_between( dlv.ActualGoodsMovementDate, $session.system_date )
+            as abap.int4 )                  as DaysWithPatient,
+      so.CreationDate                       as CreatedDate,
+      
+      prd.ProductType                       as ProductType,
+      pdt.ProductDescription                as ProductDescription,
+      prd.ExternalProductGroup              as ExternalProductGroup,
+      egt.ExternalProductGroupText          as ExternalProductGroupText
+}
+where
+      dit.Batch                   <> ''
+  and dit.Batch                   <> 'FIELDEQUIP'
+  and dlv.ActualGoodsMovementDate is not initial
+  and dlv.SoldToParty             is not initial

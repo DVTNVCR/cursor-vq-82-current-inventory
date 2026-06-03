@@ -1,18 +1,17 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Equipment Delivered to Patient (PGI)'
-@VDM.viewType: #COMPOSITE
-
+@Metadata.ignorePropagatedAnnotations: true
 define view entity ZI_PatientEquipmentDelivered
   as select from I_DeliveryDocument as dlv
     inner join I_DeliveryDocumentItem as dit
       on dit.DeliveryDocument = dlv.DeliveryDocument
-    inner join ZI_DeliverySerial_Numbers as dsr
+    inner join ZI_DELIVERYSERIAL_NUMBERS as dsr
       on  dsr.DeliveryDocument     = dit.DeliveryDocument
       and dsr.DeliveryDocumentItem = dit.DeliveryDocumentItem
 {
   key dlv.SoldToParty                              as Patient,
   key dsr.Equipment                                as Equipment,
-
       min( dlv.ActualGoodsMovementDate )           as EarliestPgiDate,
       max( dsr.SerialNumber )                      as SerialNumber,
       max( dit.Product )                           as Product,

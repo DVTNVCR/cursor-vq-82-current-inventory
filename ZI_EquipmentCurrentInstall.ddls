@@ -1,19 +1,19 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
 @AccessControl.authorizationCheck: #NOT_REQUIRED
-@EndUserText.label: 'Equipment + current EQUZ time-slice (V_EQUI replacement)'
-@VDM.viewType: #BASIC
-
+@EndUserText.label: 'Equipment time-slice: V_EQUI replacement'
+@Metadata.ignorePropagatedAnnotations: true
 define view entity ZI_EquipmentCurrentInstall
-  as select from    equi as e
-    inner join      equz as z
-      on e.equnr = z.equnr
+  as select from equi as equip
+    inner join   equz as timeseg on equip.equnr = timeseg.equnr
 {
-  key e.equnr          as Equipment,
-      e.matnr          as Material,
-      e.sernr          as SerialNumber,
-      e.charge         as Batch,
-      e.erdat          as CreationDate,
-      z.kund2          as Customer,
-      z.datab          as ValidityStartDate,
-      z.datbi          as ValidityEndDate
+  key equip.equnr   as Equipment,
+      equip.matnr   as Material,
+      equip.sernr   as SerialNumber,
+      equip.charge  as Batch,
+      equip.erdat   as CreationDate,
+      timeseg.kund2 as Customer,
+      timeseg.datab as ValidityStartDate,
+      timeseg.datbi as ValidityEndDate
 }
-where z.datbi = '99991231'
+where
+  timeseg.datbi = '99991231'

@@ -1,0 +1,16 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Delivery to Goods Movement Flow'
+@Metadata.ignorePropagatedAnnotations: true
+@VDM.viewType: #BASIC
+define view entity ZI_DELIVERY_GOODSMOVEMENT
+  as select from vbfa
+{
+  key vbelv                      as DeliveryDocument,
+  key posnv                      as DeliveryDocumentItem,
+  key vbeln                      as MaterialDocument,
+  key mjahr                      as MaterialDocumentYear,
+  key cast( posnn as abap.int4 ) as MaterialDocumentItem
+}
+where
+  vbtyp_n = 'R' //subsequent document category = Goods Movement

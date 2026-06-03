@@ -1,0 +1,13 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'SER03 Wrapper'
+@Metadata.ignorePropagatedAnnotations: true
+@VDM.viewType: #BASIC
+define view entity ZI_GoodsMovementSerial
+  as select from ser03
+{
+  key obknr                      as ObjectNumber,
+  key mblnr                      as MaterialDocument,
+  key mjahr                      as MaterialDocumentYear,
+  key cast( zeile as abap.int4 ) as MaterialDocumentItem
+}

@@ -1,0 +1,56 @@
+@AbapCatalog.sqlViewName: 'ZINV'
+@AbapCatalog.compiler.compareFilter: true
+@AbapCatalog.preserveKey: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Union of Equipment and Batches'
+@Metadata.ignorePropagatedAnnotations: true
+define view Z_I_INVENTORY
+  as select from ZI_PATIENT_INVENTORY --Changes per VQ-82: Update Serialized Inventory API Retrieval Logic 
+{
+  /* begin changes per per VQ-82: Update Serialized Inventory API Retrieval Logic  */
+  key    orderId,
+  key    partnerId,
+         materialId,
+         materialName,
+         materialType,
+         LotNumber                                                                    as lotNumber,
+         concat(substring(cast(IssueDate as abap.char(32)),1,4),concat('-',concat(substring(cast( IssueDate as abap.char(32)),5,2),
+         concat('-',substring(cast(IssueDate as abap.char(32)),7,2))))) as createdDate,
+         equipmentId,
+         manufactureDate,
+         //         SerialNumber,
+         SourceType                                                                   as sourceType
+}
+//  as select from ZI_ORDER_DELIVERY_BATCH
+//  //  as select from I_Equipment as equipment
+//{
+//
+//  key orderId                     as orderId,
+//      partnerId                   as partnerId,
+//      materialId                  as materialId,
+//      materialName                as materialName,
+//      materialType                as materialType,
+//      lotNumber                   as lotNumber,
+//      createdDate                 as createdDate,
+//      cast( '' as abap.char(20) ) as equipmentId,
+//      cast( '' as abap.char(20) ) as manufactureDate,
+//      sourceType                  as sourceType
+//}
+//
+//union all
+//
+//select from ZI_EQUIPMENT
+//{
+//      cast( '' as abap.char(20) ) as orderId,
+//      businessPartnerId           as partnerId,
+//      materialId                  as materialId,
+//      materialName                as materialName,
+//      materialType                as materialType,
+//      cast( '' as abap.char(20) ) as lotNumber,
+//      createdDate                 as createdDate,
+//  key equipmentId                 as equipmentId,
+//      manufactureDate             as manufactureDate,
+//      sourceType                  as sourceType
+//}
+
+/* End changes per per VQ-82: Update Serialized Inventory API Retrieval Logic  */
